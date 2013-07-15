@@ -273,7 +273,7 @@ func (h *Handler) SendMsg(m MSG, uuid, appData string) (*Event, error) {
 	}
 	b.WriteString("\n")
 	for k, v := range m {
-		// make sure there's no \r or \n in the key, and value.
+		// Make sure there's no \r or \n in the key, and value.
 		if strings.IndexAny(k, "\r\n") > 0 {
 			return nil, errInvalidCommand
 		}
