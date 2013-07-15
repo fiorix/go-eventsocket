@@ -12,9 +12,9 @@ your own risk.
 
 ## Installing
 
-Install with _go get_:
+Make sure $GOPATH is set, and use the following command to install:
 
-	$ go get github.com/fiorix/go-eventsocket/eventsocket
+	go get github.com/fiorix/go-eventsocket/eventsocket
 
 The library is currently a single file, so feel free to drop into any project
 without bothering to install.
