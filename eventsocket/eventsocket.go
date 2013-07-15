@@ -168,12 +168,12 @@ func (h *Handler) ReadEvent() (*Event, error) {
 		if reply[:2] == "-E" {
 			return nil, errors.New(reply[5:])
 		}
-		copyHeaders(&hdr, resp)
+		copyHeaders(&hdr, resp, false)
 	case "api/response":
 		if string(resp.Body[:2]) == "-E" {
 			return nil, errors.New(string(resp.Body)[5:])
 		}
-		copyHeaders(&hdr, resp)
+		copyHeaders(&hdr, resp, false)
 	case "text/event-plain":
 		reader := bufio.NewReader(bytes.NewReader([]byte(resp.Body)))
 		resp.Body = ""
@@ -193,7 +193,7 @@ func (h *Handler) ReadEvent() (*Event, error) {
 			}
 			resp.Body = string(b)
 		}
-		copyHeaders(&hdr, resp)
+		copyHeaders(&hdr, resp, true)
 	case "text/event-json":
 		err := json.Unmarshal([]byte(resp.Body), &resp.Header)
 		if err != nil {
@@ -213,11 +213,15 @@ func (h *Handler) ReadEvent() (*Event, error) {
 // normalizing (unescaping) its values.
 //
 // It's used after parsing plain text event headers, but not JSON.
-func copyHeaders(src *textproto.MIMEHeader, dst *Event) {
+func copyHeaders(src *textproto.MIMEHeader, dst *Event, decode bool) {
 	var err error
 	for k, v := range *src {
-		dst.Header[k], err = url.QueryUnescape(v[0])
-		if err != nil {
+		if decode {
+			dst.Header[k], err = url.QueryUnescape(v[0])
+			if err != nil {
+				dst.Header[k] = v[0]
+			}
+		} else {
 			dst.Header[k] = v[0]
 		}
 	}
