@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/textproto"
 	"net/url"
@@ -156,7 +157,7 @@ func (h *Handler) ReadEvent() (*Event, error) {
 			return nil, err
 		}
 		b := make([]byte, length)
-		if _, err = h.reader.Read(b); err != nil {
+		if _, err := io.ReadFull(h.reader, b); err != nil {
 			return nil, err
 		}
 		resp.Body = string(b)
@@ -187,7 +188,7 @@ func (h *Handler) ReadEvent() (*Event, error) {
 				return nil, err
 			}
 			b := make([]byte, length)
-			if _, err = reader.Read(b); err != nil {
+			if _, err = io.ReadFull(reader, b); err != nil {
 				return nil, err
 			}
 			resp.Body = string(b)
