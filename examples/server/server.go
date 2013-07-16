@@ -18,7 +18,7 @@ func main() {
 	eventsocket.ListenAndServe(":9090", handler)
 }
 
-func handler(c *eventsocket.Handler) {
+func handler(c *eventsocket.Connection) {
 	fmt.Println("new client:", c.RemoteAddr())
 	c.Send("connect")
 	c.Send("myevents")

@@ -37,8 +37,8 @@ var errMissingAuthRequest = errors.New("Missing auth request")
 var errInvalidPassword = errors.New("Invalid password")
 var errInvalidCommand = errors.New("Invalid command contains \\r or \\n")
 
-// Handler is the event socket connection handler.
-type Handler struct {
+// Connection is the event socket connection handler.
+type Connection struct {
 	conn          net.Conn
 	reader        *bufio.Reader
 	textreader    *textproto.Reader
@@ -46,9 +46,9 @@ type Handler struct {
 	cmd, api, evt chan *Event
 }
 
-// newHandler allocates a new Handler and initialize its buffers.
-func newHandler(c net.Conn) *Handler {
-	h := Handler{
+// newConnection allocates a new Connection and initialize its buffers.
+func newConnection(c net.Conn) *Connection {
+	h := Connection{
 		conn:   c,
 		reader: bufio.NewReaderSize(c, BufferSize),
 		err:    make(chan error),
@@ -61,7 +61,7 @@ func newHandler(c net.Conn) *Handler {
 }
 
 // HandleFunc is the function called on new incoming connections.
-type HandleFunc func(*Handler)
+type HandleFunc func(*Connection)
 
 // ListenAndServe listens for incoming connections from FreeSWITCH and calls
 // HandleFunc in a new goroutine for each client.
@@ -72,7 +72,7 @@ type HandleFunc func(*Handler)
 //		eventsocket.ListenAndServe(":9090", handler)
 //	}
 //
-//	func handler(c *eventsocket.Handler) {
+//	func handler(c *eventsocket.Connection) {
 //		ev, err := c.Send("connect") // must always start with this
 //		ev.PrettyPrint()             // print event to the console
 //		...
@@ -93,7 +93,7 @@ func ListenAndServe(addr string, fn HandleFunc) error {
 		if err != nil {
 			return err
 		}
-		h := newHandler(c)
+		h := newConnection(c)
 		go h.readLoop()
 		go fn(h)
 	}
@@ -112,12 +112,12 @@ func ListenAndServe(addr string, fn HandleFunc) error {
 //		...
 //	}
 //
-func Dial(addr, passwd string) (*Handler, error) {
+func Dial(addr, passwd string) (*Connection, error) {
 	c, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	h := newHandler(c)
+	h := newConnection(c)
 	m, err := h.textreader.ReadMIMEHeader()
 	if err != nil {
 		c.Close()
@@ -142,7 +142,7 @@ func Dial(addr, passwd string) (*Handler, error) {
 }
 
 // readLoop calls readOne until a fatal error occurs, then close the socket.
-func (h *Handler) readLoop() {
+func (h *Connection) readLoop() {
 	for h.readOne() {
 	}
 	h.Close()
@@ -150,7 +150,7 @@ func (h *Handler) readLoop() {
 
 // readOne reads a single event and send over the appropriate channel.
 // It separates incoming events from api and command responses.
-func (h *Handler) readOne() bool {
+func (h *Connection) readOne() bool {
 	hdr, err := h.textreader.ReadMIMEHeader()
 	if err != nil {
 		h.err <- err
@@ -238,12 +238,12 @@ func (h *Handler) readOne() bool {
 }
 
 // RemoteAddr returns the remote addr of the connection.
-func (h *Handler) RemoteAddr() net.Addr {
+func (h *Connection) RemoteAddr() net.Addr {
 	return h.conn.RemoteAddr()
 }
 
 // Close terminates the connection.
-func (h *Handler) Close() {
+func (h *Connection) Close() {
 	h.conn.Close()
 }
 
@@ -253,7 +253,7 @@ func (h *Handler) Close() {
 // When subscribing to events (e.g. `Send("events json ALL")`) it makes no
 // difference to use plain or json. ReadEvent will parse them and return
 // all headers and the body (if any) in an Event struct.
-func (h *Handler) ReadEvent() (*Event, error) {
+func (h *Connection) ReadEvent() (*Event, error) {
 	var (
 		ev  *Event
 		err error
@@ -288,7 +288,7 @@ func copyHeaders(src *textproto.MIMEHeader, dst *Event, decode bool) {
 //
 // See http://wiki.freeswitch.org/wiki/Event_Socket#Command_Documentation for
 // details.
-func (h *Handler) Send(command string) (*Event, error) {
+func (h *Connection) Send(command string) (*Event, error) {
 	// Sanity check to avoid breaking the parser
 	if strings.IndexAny(command, "\r\n") > 0 {
 		return nil, errInvalidCommand
@@ -334,7 +334,7 @@ type MSG map[string]string
 // If appData is set, a "content-length" header is expected (lower case!).
 //
 // See http://wiki.freeswitch.org/wiki/Event_Socket#sendmsg for details.
-func (h *Handler) SendMsg(m MSG, uuid, appData string) (*Event, error) {
+func (h *Connection) SendMsg(m MSG, uuid, appData string) (*Event, error) {
 	b := bytes.NewBufferString("sendmsg")
 	if uuid != "" {
 		// Make sure there's no \r or \n in the UUID.
@@ -383,7 +383,7 @@ func (h *Handler) SendMsg(m MSG, uuid, appData string) (*Event, error) {
 //	Execute("playback", "/tmp/test.wav", false)
 //
 // See http://wiki.freeswitch.org/wiki/Event_Socket#execute for details.
-func (h *Handler) Execute(appName, appArg string, lock bool) (*Event, error) {
+func (h *Connection) Execute(appName, appArg string, lock bool) (*Event, error) {
 	var evlock string
 	if lock {
 		// Could be strconv.FormatBool(lock), but we don't want to
@@ -400,7 +400,7 @@ func (h *Handler) Execute(appName, appArg string, lock bool) (*Event, error) {
 
 // ExecuteUUID is similar to Execute, but takes a UUID and no lock. Suitable
 // for use on inbound event socket connections (acting as client).
-func (h *Handler) ExecuteUUID(uuid, appName, appArg string) (*Event, error) {
+func (h *Connection) ExecuteUUID(uuid, appName, appArg string) (*Event, error) {
 	return h.SendMsg(MSG{
 		"call-command":     "execute",
 		"execute-app-name": appName,
