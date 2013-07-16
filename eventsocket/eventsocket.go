@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/textproto"
 	"net/url"
@@ -38,14 +39,23 @@ var errInvalidCommand = errors.New("Invalid command contains \\r or \\n")
 
 // Handler is the event socket connection handler.
 type Handler struct {
-	conn       net.Conn
-	reader     *bufio.Reader
-	textreader *textproto.Reader
+	conn          net.Conn
+	reader        *bufio.Reader
+	textreader    *textproto.Reader
+	err           chan error
+	cmd, api, evt chan *Event
 }
 
 // newHandler allocates a new Handler and initialize its buffers.
 func newHandler(c net.Conn) *Handler {
-	h := Handler{conn: c, reader: bufio.NewReaderSize(c, BufferSize)}
+	h := Handler{
+		conn:   c,
+		reader: bufio.NewReaderSize(c, BufferSize),
+		err:    make(chan error),
+		cmd:    make(chan *Event),
+		api:    make(chan *Event),
+		evt:    make(chan *Event),
+	}
 	h.textreader = textproto.NewReader(h.reader)
 	return &h
 }
@@ -83,7 +93,9 @@ func ListenAndServe(addr string, fn HandleFunc) error {
 		if err != nil {
 			return err
 		}
-		go fn(newHandler(c))
+		h := newHandler(c)
+		go h.readLoop()
+		go fn(h)
 	}
 	return nil
 }
@@ -125,7 +137,100 @@ func Dial(addr, passwd string) (*Handler, error) {
 		c.Close()
 		return nil, errInvalidPassword
 	}
+	go h.readLoop()
 	return h, err
+}
+
+// readLoop calls readOne until a fatal error occurs, then close the socket.
+func (h *Handler) readLoop() {
+	for h.readOne() {
+	}
+	h.Close()
+}
+
+// readOne reads a single event and send over the appropriate channel.
+// It separates incoming events from api and command responses.
+func (h *Handler) readOne() bool {
+	hdr, err := h.textreader.ReadMIMEHeader()
+	if err != nil {
+		h.err <- err
+		return false
+	}
+	resp := new(Event)
+	resp.Header = make(EventHeader)
+	if v := hdr.Get("Content-Length"); v != "" {
+		length, err := strconv.Atoi(v)
+		if err != nil {
+			h.err <- err
+			return false
+		}
+		b := make([]byte, length)
+		if _, err := io.ReadFull(h.reader, b); err != nil {
+			h.err <- err
+			return false
+		}
+		resp.Body = string(b)
+	}
+	switch hdr.Get("Content-Type") {
+	case "command/reply":
+		reply := hdr.Get("Reply-Text")
+		if reply[:2] == "-E" {
+			h.err <- errors.New(reply[5:])
+			return true
+		}
+		copyHeaders(&hdr, resp, false)
+		h.cmd <- resp
+	case "api/response":
+		if string(resp.Body[:2]) == "-E" {
+			h.err <- errors.New(string(resp.Body)[5:])
+			return true
+		}
+		copyHeaders(&hdr, resp, false)
+		h.api <- resp
+	case "text/event-plain":
+		reader := bufio.NewReader(bytes.NewReader([]byte(resp.Body)))
+		resp.Body = ""
+		textreader := textproto.NewReader(reader)
+		hdr, err = textreader.ReadMIMEHeader()
+		if err != nil {
+			h.err <- err
+			return false
+		}
+		if v := hdr.Get("Content-Length"); v != "" {
+			length, err := strconv.Atoi(v)
+			if err != nil {
+				h.err <- err
+				return false
+			}
+			b := make([]byte, length)
+			if _, err = io.ReadFull(reader, b); err != nil {
+				h.err <- err
+				return false
+			}
+			resp.Body = string(b)
+		}
+		copyHeaders(&hdr, resp, true)
+		h.evt <- resp
+	case "text/event-json":
+		err := json.Unmarshal([]byte(resp.Body), &resp.Header)
+		if err != nil {
+			h.err <- err
+			return false
+		}
+		if v, _ := resp.Header["_body"]; v != "" {
+			resp.Body = v
+			delete(resp.Header, "_body")
+		} else {
+			resp.Body = ""
+		}
+		h.evt <- resp
+	case "text/disconnect-notice":
+		copyHeaders(&hdr, resp, false)
+		h.evt <- resp
+	default:
+		log.Fatal("Unsupported event:", hdr)
+	}
+	return true
 }
 
 // RemoteAddr returns the remote addr of the connection.
@@ -145,68 +250,16 @@ func (h *Handler) Close() {
 // difference to use plain or json. ReadEvent will parse them and return
 // all headers and the body (if any) in an Event struct.
 func (h *Handler) ReadEvent() (*Event, error) {
-	hdr, err := h.textreader.ReadMIMEHeader()
-	if err != nil {
+	var (
+		ev  *Event
+		err error
+	)
+	select {
+	case ev = <-h.evt:
+		return ev, nil
+	case err = <-h.err:
 		return nil, err
 	}
-	resp := new(Event)
-	resp.Header = make(EventHeader)
-	if v := hdr.Get("Content-Length"); v != "" {
-		length, err := strconv.Atoi(v)
-		if err != nil {
-			return nil, err
-		}
-		b := make([]byte, length)
-		if _, err := io.ReadFull(h.reader, b); err != nil {
-			return nil, err
-		}
-		resp.Body = string(b)
-	}
-	switch hdr.Get("Content-Type") {
-	case "command/reply":
-		reply := hdr.Get("Reply-Text")
-		if reply[:2] == "-E" {
-			return nil, errors.New(reply[5:])
-		}
-		copyHeaders(&hdr, resp, false)
-	case "api/response":
-		if string(resp.Body[:2]) == "-E" {
-			return nil, errors.New(string(resp.Body)[5:])
-		}
-		copyHeaders(&hdr, resp, false)
-	case "text/event-plain":
-		reader := bufio.NewReader(bytes.NewReader([]byte(resp.Body)))
-		resp.Body = ""
-		textreader := textproto.NewReader(reader)
-		hdr, err = textreader.ReadMIMEHeader()
-		if err != nil {
-			return nil, err
-		}
-		if v := hdr.Get("Content-Length"); v != "" {
-			length, err := strconv.Atoi(v)
-			if err != nil {
-				return nil, err
-			}
-			b := make([]byte, length)
-			if _, err = io.ReadFull(reader, b); err != nil {
-				return nil, err
-			}
-			resp.Body = string(b)
-		}
-		copyHeaders(&hdr, resp, true)
-	case "text/event-json":
-		err := json.Unmarshal([]byte(resp.Body), &resp.Header)
-		if err != nil {
-			return nil, err
-		}
-		if v, _ := resp.Header["_body"]; v != "" {
-			resp.Body = v
-			delete(resp.Header, "_body")
-		} else {
-			resp.Body = ""
-		}
-	}
-	return resp, nil
 }
 
 // copyHeaders copies all keys and values from the MIMEHeader to Event.Header,
@@ -237,7 +290,18 @@ func (h *Handler) Send(command string) (*Event, error) {
 		return nil, errInvalidCommand
 	}
 	fmt.Fprintf(h.conn, "%s\r\n\r\n", command)
-	return h.ReadEvent()
+	var (
+		ev  *Event
+		err error
+	)
+	select {
+	case ev = <-h.cmd:
+		return ev, nil
+	case ev = <-h.api:
+		return ev, nil
+	case err = <-h.err:
+		return nil, err
+	}
 }
 
 // MSG is the container used by SendMsg to store messages sent to FreeSWITCH.
@@ -295,7 +359,16 @@ func (h *Handler) SendMsg(m MSG, uuid, appData string) (*Event, error) {
 	if _, err := b.WriteTo(h.conn); err != nil {
 		return nil, err
 	}
-	return h.ReadEvent()
+	var (
+		ev  *Event
+		err error
+	)
+	select {
+	case ev = <-h.cmd:
+		return ev, nil
+	case err = <-h.err:
+		return nil, err
+	}
 }
 
 // Execute is a shortcut to SendMsg with call-command: execute without UUID,
