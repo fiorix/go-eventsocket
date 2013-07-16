@@ -178,7 +178,11 @@ func (h *Handler) readOne() bool {
 			h.err <- errors.New(reply[5:])
 			return true
 		}
-		copyHeaders(&hdr, resp, false)
+		if reply[0] == '%' {
+			copyHeaders(&hdr, resp, true)
+		} else {
+			copyHeaders(&hdr, resp, false)
+		}
 		h.cmd <- resp
 	case "api/response":
 		if string(resp.Body[:2]) == "-E" {
@@ -444,7 +448,7 @@ func (r *Event) PrettyPrint() {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Printf("%s: %s\n", k, r.Header[k])
+		fmt.Printf("%s: %#v\n", k, r.Header[k])
 	}
 	if r.Body != "" {
 		fmt.Printf("BODY: %#v\n", r.Body)
