@@ -259,10 +259,10 @@ func (h *Connection) ReadEvent() (*Event, error) {
 		err error
 	)
 	select {
-	case ev = <-h.evt:
-		return ev, nil
 	case err = <-h.err:
 		return nil, err
+	case ev = <-h.evt:
+		return ev, nil
 	}
 }
 
@@ -299,12 +299,12 @@ func (h *Connection) Send(command string) (*Event, error) {
 		err error
 	)
 	select {
+	case err = <-h.err:
+		return nil, err
 	case ev = <-h.cmd:
 		return ev, nil
 	case ev = <-h.api:
 		return ev, nil
-	case err = <-h.err:
-		return nil, err
 	}
 }
 
@@ -368,10 +368,12 @@ func (h *Connection) SendMsg(m MSG, uuid, appData string) (*Event, error) {
 		err error
 	)
 	select {
-	case ev = <-h.cmd:
-		return ev, nil
 	case err = <-h.err:
 		return nil, err
+	case ev = <-h.cmd:
+		return ev, nil
+	case ev = <-h.evt:
+		return ev, nil
 	}
 }
 
