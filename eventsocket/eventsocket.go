@@ -98,7 +98,6 @@ func ListenAndServe(addr string, fn HandleFunc) error {
 		go h.readLoop()
 		go fn(h)
 	}
-	return nil
 }
 
 // Dial attemps to connect to FreeSWITCH and authenticate.
