@@ -52,7 +52,7 @@ func newConnection(c net.Conn) *Connection {
 	h := Connection{
 		conn:   c,
 		reader: bufio.NewReaderSize(c, bufferSize),
-		err:    make(chan error),
+		err:    make(chan error, 1),
 		cmd:    make(chan *Event),
 		api:    make(chan *Event),
 		evt:    make(chan *Event, eventsBuffer),
