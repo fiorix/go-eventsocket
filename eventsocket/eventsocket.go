@@ -29,14 +29,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const bufferSize = 1024 << 6 // For the socket reader
 const eventsBuffer = 16      // For the events channel (memory eater!)
+const timeoutPeriod = 60 * time.Second
 
 var errMissingAuthRequest = errors.New("Missing auth request")
 var errInvalidPassword = errors.New("Invalid password")
 var errInvalidCommand = errors.New("Invalid command contains \\r or \\n")
+var errTimeout = errors.New("Timeout")
 
 // Connection is the event socket connection handler.
 type Connection struct {
@@ -339,6 +342,8 @@ func (h *Connection) Send(command string) (*Event, error) {
 		return ev, nil
 	case ev = <-h.api:
 		return ev, nil
+	case <-time.After(timeoutPeriod):
+		return nil, errTimeout
 	}
 }
 
@@ -406,6 +411,8 @@ func (h *Connection) SendMsg(m MSG, uuid, appData string) (*Event, error) {
 		return nil, err
 	case ev = <-h.cmd:
 		return ev, nil
+	case <-time.After(timeoutPeriod):
+		return nil, errTimeout
 	}
 }
 
