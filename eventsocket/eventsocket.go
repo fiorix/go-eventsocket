@@ -468,6 +468,9 @@ func (r *Event) String() string {
 
 // Get returns an Event value, or "" if the key doesn't exist.
 func (r *Event) Get(key string) string {
+	if val, ok := r.Header[key]; !ok || val == nil {
+		return ""
+	}
 	if s, ok := r.Header[key].([]string); ok {
 		return strings.Join(s, ", ")
 	}
