@@ -468,13 +468,14 @@ func (r *Event) String() string {
 
 // Get returns an Event value, or "" if the key doesn't exist.
 func (r *Event) Get(key string) string {
-	if val, ok := r.Header[key]; !ok || val == nil {
+	val, ok := r.Header[key]
+	if !ok || val == nil {
 		return ""
 	}
-	if s, ok := r.Header[key].([]string); ok {
+	if s, ok := val.([]string); ok {
 		return strings.Join(s, ", ")
 	}
-	return r.Header[key].(string)
+	return val.(string)
 }
 
 // GetInt returns an Event value converted to int, or an error if conversion
