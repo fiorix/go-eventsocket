@@ -47,6 +47,7 @@ type Connection struct {
 	reader        *bufio.Reader
 	textreader    *textproto.Reader
 	err           chan error
+	ret           chan error
 	cmd, api, evt chan *Event
 }
 
@@ -56,6 +57,7 @@ func newConnection(c net.Conn) *Connection {
 		conn:   c,
 		reader: bufio.NewReaderSize(c, bufferSize),
 		err:    make(chan error, 1),
+        	ret:    make(chan error, 1),
 		cmd:    make(chan *Event),
 		api:    make(chan *Event),
 		evt:    make(chan *Event, eventsBuffer),
@@ -177,8 +179,8 @@ func (h *Connection) readOne() bool {
 	switch hdr.Get("Content-Type") {
 	case "command/reply":
 		reply := hdr.Get("Reply-Text")
-		if len(reply)>1 && reply[:2] == "-E" {
-			h.err <- errors.New(reply[5:])
+		if len(reply) > 1 && reply[:2] == "-E" {
+			h.ret <- errors.New(reply[5:])
 			return true
 		}
 		if reply[0] == '%' {
@@ -188,8 +190,8 @@ func (h *Connection) readOne() bool {
 		}
 		h.cmd <- resp
 	case "api/response":
-		if len(resp.Body)>1 && string(resp.Body[:2]) == "-E" {
-			h.err <- errors.New(string(resp.Body)[5:])
+		if len(resp.Body) > 1 && string(resp.Body[:2]) == "-E" {
+			h.ret <- errors.New(string(resp.Body)[5:])
 			return true
 		}
 		copyHeaders(&hdr, resp, false)
@@ -336,7 +338,7 @@ func (h *Connection) Send(command string) (*Event, error) {
 		err error
 	)
 	select {
-	case err = <-h.err:
+	case err = <-h.ret:
 		return nil, err
 	case ev = <-h.cmd:
 		return ev, nil
@@ -407,7 +409,7 @@ func (h *Connection) SendMsg(m MSG, uuid, appData string) (*Event, error) {
 		err error
 	)
 	select {
-	case err = <-h.err:
+	case err = <-h.ret:
 		return nil, err
 	case ev = <-h.cmd:
 		return ev, nil
